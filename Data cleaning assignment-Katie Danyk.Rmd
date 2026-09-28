@@ -5,7 +5,295 @@ date: "2026-09-28"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+# Step 1: Load the required packages and read in the raw data
+
+Before I begin the assignment, I need to load the packages and ensure that my code is reproducible by recording package versions and establishing file paths.
+
+
+### 1a. Load packages
+
+```{r, message = FALSE}
+library(renv) 
+library(here)
+library(tidyverse)
+library(assertr)
+library(skimr)
+library(GGally)
 ```
+
+
+### 1b. Record and lock package versions
+
+I will do this with the 'init()' and 'snapshot()' commands from the package 'renv'
+```{r}
+renv::init()
+snapshot()
+status()
+```
+
+
+### 1c. Build file paths
+
+I will do this using the 'here' package
+```{r}
+here::here(
+  "Raw_data",
+  "chl-a-samples-messy.csv"
+)
+
+here::here(
+  "Raw_data",
+  "stations-messy.csv"
+)
+
+here::here(
+  "Raw_data",
+  "waterbodies-messy.csv"
+)
+```
+
+
+### 1d. Read in raw data
+
+I will use the 'read_csv' command from readr
+```{r}
+# messy chl a samples data
+chl_a_messy <- read_csv("Raw_data/chl-a-samples-messy.csv")
+  
+# messy stations data
+stations_messy <- read_csv("Raw_data/stations-messy.csv")
+  
+# messy waterbodies data 
+waterbodies_messy <- read_csv("Raw_data/waterbodies-messy.csv")
+```
+
+
+
+
+# Step 2: Explore the datasets
+
+Before I can clean the data, I need to explore the structure, variable classes, distributions, and categorical values of each dataset. I also need to use an entity relationship diagram (ERD) to inspect the column names in each of the datasets and determine which shared identifier columns can be used to connect the datasets. 
+
+
+### 2a. Chl a dataset
+
+First, I'm going to look at the structure, variable classes, and categorical values of the chl a dataset. I'm going to use 'str()' to see the class of each variable and 'dim()' to get the number of rows and columns. I'm also going to use 'head()' to look at the first five rows of data to get an idea of what they look like and 'skim()' to generate a summary of the dataset and each variable.
+```{r}
+str(chl_a_messy)
+
+dim(chl_a_messy)
+
+head(chl_a_messy)
+
+skim(chl_a_messy)
+```
+
+~~ SUMMARY~~ 
+*str() output*
+From the str() output, I can see that the variables with the class 'character' are: 
+  - chl_a_sample_code
+  - station_code
+  - date
+  - sample_volume_filtered_ml
+  - absorbance_663nm
+  - description
+  - unit
+
+I can also see that the variables with the class 'numeric' are: 
+  - sample_replicate
+  - subsample_replicate
+  - extract_volume_ml
+  - absorbance_750nm
+  - absorbance_645nm
+  - absorbance_630nm
+  - chl_a_16ed
+  - chl_a_20ed
+
+Based on the Data Dictionary, and the output of the str() command, I can tell that some of the variables are classed incorrectly:
+  - sample_volume_filtered_ml should be 'numeric'
+  - absorbance_663nm should be class 'numeric'
+  - sample_replicate should be class 'integer' because it can only be whole numbers
+  - subsample_replicate should be class 'integer' because it can only be whole numbers
+  - date should be class 'date'
+  
+*dim() output*
+The dim() output tells me that there are 1578 rows and 15 columns.
+
+*skim() output*
+From the skim() output, I can see that none of the 'character' variables have white spaces or missing values, except "description", but this is okay because the Data Dictionary says that "description" was not always recorded. 
+
+For the 'numeric' variable part of the skim() output, I can see that the only variables with missing values are "sample_replicate" and "subsample_replicate". This is not a problem for "subsample_replicate" based on the Data Dictionary description, but the Data Dictionary does not mention missing values for "sample_replicate" so there are potentially errors here.
+
+I can also see that "extract_volume_ml" has a -9.8 in the "p0" column, leading me to believe there is a typo in the "extract_volume_ml" column because this column should only contain positive values based on the Data Dictionary description.
+
+Lastly, the "p100" column has a 70.680 and 391.050 for "chl_a_16ed" and "chl_a_20ed" respectively, which both seem a bit high compared to the means and sd's and suggests that there might be typos in these columns.
+
+
+
+Then, I'm going to look at the distributions of the 'numeric' variables with histograms 
+```{r}
+ggplot() +
+  geom_histogram(data = chl_a_messy, aes(x = extract_volume_ml))
+
+ggplot() +
+  geom_histogram(data = chl_a_messy, aes(x = as.numeric(sample_volume_filtered_ml))) # I'm coercing the variable to 'numeric' inside the plot only, just so I can see the distribution
+
+ggplot() +
+  geom_histogram(data = chl_a_messy, aes(x = absorbance_750nm))
+
+ggplot() +
+  geom_histogram(data = chl_a_messy, aes(x = as.numeric(absorbance_663nm))) # I'm coercing the variable to 'numeric' inside the plot only, just so I can see the distribution
+
+ggplot() +
+  geom_histogram(data = chl_a_messy, aes(x = absorbance_645nm))
+
+ggplot() +
+  geom_histogram(data = chl_a_messy, aes(x = absorbance_630nm))
+
+ggplot() +
+  geom_histogram(data = chl_a_messy, aes(x = chl_a_16ed))
+
+ggplot() +
+  geom_histogram(data = chl_a_messy, aes(x = chl_a_20ed))
+```
+
+~~ SUMMARY ~~
+*extract_volume_ml*
+There is a negative value, which I also identified with the skim() command above. This must be a typo as these values should all be positive based on the Data Dictionary. 
+
+*sample_volume_filtered_ml*
+There is a value around 10,000 which is likely a typo because a value this large doesn't make sense based on the Data Dictionary. I also had to coerce this variable to numeric, resulting in a warning message. This tells me there is likely a comma or a letter accidentally included in one of the entries that I will have to correct.
+
+*absorbance_750nm*
+This distribution looks alright, although there is potentially an outlier around 0.20. I will formally check for outliers in a later step.
+
+*absorbance_663nm*
+This distribution looks alright. I also had to coerce this variable to numeric, resulting in a warning message. This tells me there is likely a comma or a letter accidentally included in one of the entries that I will have to correct.
+
+*absorbance_645nm*
+This distribution looks alright, but I will formally check for outliers in a later step.
+
+*absorbance_630nm*
+This distribution looks alright, but I will formally check for outliers in a later step.
+
+*chl_a_16ed*
+This distribution looks alright, although there could be outliers around 65 and 70. I will formally check for outliers in a later step.
+
+*chl_a_20ed*
+There is a value around 400, which is potentially a typo and likely an outlier. I will formally check for outliers in a later step.
+
+
+
+### 2b. Stations dataset
+
+First, I'm going to look at the structure, variable classes, and categorical values of the chl a dataset. I'm going to use 'str()' to see the class of each variable and 'dim()' to get the number of rows and columns. I'm also going to use 'head()' to look at the first five rows of data to get an idea of what they look like and 'skim()' to generate a summary of the dataset and each variable.
+```{r}
+str(stations_messy)
+
+dim(stations_messy)
+
+head(stations_messy)
+
+skim(stations_messy)
+```
+
+~~ SUMMARY~~ 
+*str() output*
+From the str() output, I can see that the variables with class 'character' are:
+  - station_code
+  - waterbody_code
+  - station_name
+  - station_type
+  
+I can also see that the variables with class 'numeric' are: 
+  - latitude
+  - longitude
+  
+All the classes are correct
+
+*dim() output*
+From the dim() output, I can see that there are 97 rows and 6 columns
+
+*skim() output*
+For the 'character' part of the skim() output, I can see that none of the columns contain missing values or white spaces, which is correct based on the Data Dictionary descriptions.
+
+In the 'numeric' part of the output, I can see that there are no missing values, which is correct based on the Data Dictionary descriptions. 
+
+There seems to be typos in both the "latitude" and "longitude" columns. In the skim() output, "p0" for "latitude" is -83.96436, which does not make sense for where Ontario is in the world. Additionally, "p100" for "longitude" is 84.11925, which also does not make sense for where Ontario is in the world.
+
+
+
+Then, I'm going to look at the distributions of the 'numeric' variables with histograms
+```{r}
+ggplot() +
+  geom_histogram(data = stations_messy, aes(x = latitude))
+
+ggplot() +
+  geom_histogram(data = stations_messy, aes(x = longitude))
+```
+
+~~ SUMMARY ~~
+*latitude*
+I can see the value at about -84 again that I previously identified using skim()
+
+*longitude*
+It looks like there are two typos in "longitude". I previously identified the one at about 84 with skim(), but I can see an additional point here at about 50. The point at about 80 is likely just missing the "-" and can be fixed later. It's possible the latitude typo at -84 and the longitude typo at about 50 are coordinates of one station, just entered in the incorrect column, but I will check this in a later step.
+
+
+
+### 2c. Waterbodies dataset
+
+First, I'm going to look at the structure, variable classes, and categorical values of the chl a dataset. I'm going to use 'str()' to see the class of each variable and 'dim()' to get the number of rows and columns. I'm also going to use 'head()' to look at the first five rows of data to get an idea of what they look like and 'skim()' to generate a summary of the dataset and each variable.
+```{r}
+str(waterbodies_messy)
+
+dim(waterbodies_messy)
+
+head(waterbodies_messy)
+
+skim(waterbodies_messy)
+```
+
+~~ SUMMARY~~ 
+*str() output*
+From the str() output, I can see that the columns with class 'character' are:
+  - waterbody_code
+  - waterbody_name
+  
+Both columns have the correct class based on the Data Dictionary descriptions
+
+*dim() output*
+The dim() output lets me knwo that this dataset has 87 rows and 2 columns
+
+*skim() output*
+The skim() output tells me that there are no missing values or white spaces in either column, which is correct based on the Data Dictionary.
+
+I can also see that "n_unique" is 87 for both "waterbody_code" and "waterbody_name". I know this is correct because each waterbody should have a unique and code
+
+
+
+I cannot look at the distribution of these variables because they are not numeric.
+
+
+
+### 2d. ERD
+
+From the provided ERD, I can see that the column "waterbody_code" can be used to join the waterbodies and stations datasets. From my skim() output above, I can see that the "waterbody_code" contains 87 unique values in both datasets.
+
+Once the waterbodies and stations datasets are merged, I can then use the column "station_code" can be used to join the previously merged datasets with the chl a dataset. From my skim() output about, I can see that the stations dataset has 97 unique "station_code" values, while the chl a dataset only has 70 unique values. This is likely because not every station was sampled, but I will check that there are no incorrect station codes in a later step.
+
+
+
+
+
+# Step 3: Cleaning
+
+
+
+
+
+
+
+
+
 
