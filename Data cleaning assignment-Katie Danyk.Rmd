@@ -18,17 +18,19 @@ library(here)
 library(tidyverse)
 library(assertr)
 library(skimr)
-library(GGally)
+library(rempsyc)
 ```
 
 
 ### 1b. Record and lock package versions
 
-I will do this with the 'init()' and 'snapshot()' commands from the package 'renv'
+I will do this with the 'init()', 'snapshot()', and 'status()' commands from the package 'renv'
 ```{r}
-renv::init()
+#renv::init()
 snapshot()
 status()
+
+#renv::restore()
 ```
 
 
@@ -120,7 +122,7 @@ Based on the Data Dictionary, and the output of the str() command, I can tell th
 The dim() output tells me that there are 1578 rows and 15 columns.
 
 *skim() output*
-From the skim() output, I can see that none of the 'character' variables have white spaces or missing values, except "description", but this is okay because the Data Dictionary says that "description" was not always recorded. 
+From the skim() output, I can see that none of the 'character' variables have white spaces or missing values, except "description", but this is okay because the Data Dictionary says that "description" was not always recorded. There are also two unique values for "units", when ther should only be one.
 
 For the 'numeric' variable part of the skim() output, I can see that the only variables with missing values are "sample_replicate" and "subsample_replicate". This is not a problem for "subsample_replicate" based on the Data Dictionary description, but the Data Dictionary does not mention missing values for "sample_replicate" so there are potentially errors here.
 
@@ -288,10 +290,288 @@ Once the waterbodies and stations datasets are merged, I can then use the column
 
 # Step 3: Cleaning
 
+### 3a. Chl a dataset
+
+From my exploration of the chl a dataset above, I have identified the following errors:
+  *Individual outliers*
+    - potential outlier in absorbance_750nm around 0.20
+    - potential outliers in chl_a_16ed around 65 and 70
+    - potential outlier in chl_a_20ed around 400
+  
+  *Formatting errors*
+    - sample_volume_filtered_ml should be 'numeric'
+    - absorbance_663nm should be class 'numeric'
+    - sample_replicate should be class 'integer' because it can only be whole numbers
+    - subsample_replicate should be class 'integer' because it can only be whole numbers
+    - date should be class 'date' and changed to ISO 8601
+    - chl_a_16ed and chl_a_20ed contain two different units when they should only be mg/L
+    
+  *String errors*  
+  
+  *Invalid values*
+    - extract_volume_ml has a negative value
+    - sample_volume_filtered_ml has a value around 10,000
+  
+More errors may be revealed as I clean the data and they will be dealt with as they appear. I'm going to start with resolving *formatting errors* because I believe these will be the easiest to resolve.
+
+Before I begin, I will duplicate the dataset so I'm not editing the raw data
+```{r}
+chl_a_clean <- chl_a_messy
+```
+
+First, sample_volume_filtered_ml should be 'numeric' not 'character'. This leads me to believe that there are embedded units or a comma instead of a decimal. I'm going to check for these using the 'grep()' command from base R.
+```{r}
+# step 1. identify the row that contains the typo
+grep(',|mL|ml', chl_a_messy$sample_volume_filtered_ml) # identifies a match in row 163
+
+# step 2. view the row that contains the typo so I can avoid hard coding the fix
+chl_a_messy %>%
+  slice(163) 
+
+# step 3. replace the incorrect value with the correct value
+chl_a_clean$sample_volume_filtered_ml[chl_a_clean$sample_volume_filtered_ml == '1,000 mL'] <- '1000'
+ 
+# step 4. check to make sure it worked 
+grep(',|mL|ml', chl_a_clean$sample_volume_filtered_ml) # identifies no matches
+
+# step 5. change the class to 'numeric'
+chl_a_clean$sample_volume_filtered_ml <- as.numeric(chl_a_clean$sample_volume_filtered_ml)
+
+# step 6. check that the change worked
+is.numeric(chl_a_clean$sample_volume_filtered_ml)
+```
+
+Next, absorbance_663nm should be 'numeric' not 'character. This leads me to believe that there are embedded units or a comma instead of a decimal. I'm going to check for these using the 'grep()' command from base R.
+```{r}
+# step 1. identify the row that contains the typo
+grep(',|nm', chl_a_messy$absorbance_663nm) # identifies a match in row 154
+
+# step 2. view the row that contains the typo so I can avoid hard coding the fix
+chl_a_messy %>%
+  slice(154) 
+
+# step 3. replace the incorrect value with the correct value
+chl_a_clean$absorbance_663nm[chl_a_clean$absorbance_663nm == '0,026'] <- '0.026'
+
+# step 4. check to make sure it worked 
+grep(',|nm', chl_a_clean$absorbance_663nm) # identifies no matches
+
+# step 5. change the class to 'numeric'
+chl_a_clean$absorbance_663nm <- as.numeric(chl_a_clean$absorbance_663nm)
+
+# step 6. check that the class is correct
+is.numeric(chl_a_clean$absorbance_663nm)
+```
+
+Next, sample_replicate should be class 'integer' not 'numeric'. I will look for decimals using the 'grep()' command from base R.
+```{r}
+# step 1. identify the row that contains the typo
+grep('.', chl_a_messy$sample_replicate) # there doesn't appear to be a decimal present so I should be okay to just switch the class
+
+# step 2. change the class to 'integer'
+chl_a_clean$sample_replicate <- as.integer(chl_a_clean$sample_replicate)
+
+# step 3. check that the class is correct
+is.integer(chl_a_clean$sample_replicate)
+```
+
+Next, subsample_replicate should be class 'integer' not 'numeric'. I will look for decimals using the 'grep()' command from base R. 
+```{r}
+# step 1. identify the row that contains the typo
+grep('.', chl_a_messy$subsample_replicate) # there doesn't appear to be a decimal present so I should be okay to just switch the class
+
+# step 2. change the class to 'integer'
+chl_a_clean$subsample_replicate <- as.integer(chl_a_clean$subsample_replicate)
+
+# step 3. check that the class is correct
+is.integer(chl_a_clean$subsample_replicate)
+```
+
+Next I will address the date. Before I can change the class to 'date', I need to make sure that all the dates are formatted in the same way. Incorrectly formatted dates could include "/", " ", "_", ",", or words
+```{r}
+# step 1. determine if there are any incorrectly formatted dates
+grep('/| |_|,', chl_a_messy$date) # identified three incorrect dates in rows 507, 524, and 1008
+
+# step 2. view the rows that contain the typos so I can avoid hard coding the fix
+chl_a_messy %>%
+  slice(507, 524, 1008) 
+
+# step 3. replace the incorrectly formatted dates with yyyy-mm-dd format
+chl_a_clean$date[chl_a_clean$date == 'June 14, 1999'] <- '1999-06-14'
+chl_a_clean$date[chl_a_clean$date == '28/06/1999'] <- '1999-06-28'
+chl_a_clean$date[chl_a_clean$date == '10/15/2002'] <- '2002-10-15'
+
+# step 4. check to make sure it worked 
+grep('/| |_|,', chl_a_clean$date) # identifies no matches
+
+# step 5. change the class to 'date'
+chl_a_clean <- chl_a_clean %>%
+  mutate(date = lubridate::ymd(date))
+
+# step 6. check that the class is correct
+is.Date(chl_a_clean$date)
+```
+
+The last formatting error I identified was that two units were being used for chl_a_16ed and chl_a_20ed when there should only be one. To fix this I will convert all the mg/m3 values to mg/L. 
+1 mg/m3 = 0.001 mg/L so I need to multiply these values by 0.001 to convert to m/L
+```{r}
+# step 1. separate the dataset into two by on the unit that was used
+chl_a_messy_mgL <- chl_a_messy %>%
+  filter(unit == "mg/L")
+chl_a_messy_mgm3 <- chl_a_messy %>%
+  filter(unit == "mg/m3")
+
+# step 2. correct the values in the mg/m3 dataset
+chl_a_messy_mgm3 <- chl_a_messy_mgm3 %>%
+  mutate(chl_a_16ed_mgL = chl_a_16ed*0.001, # calculate correct values
+         chl_a_20ed_mgL = chl_a_20ed*0.001,
+         unit = "mg/L") %>% # change to the correct units
+  dplyr::select(!c(chl_a_16ed, chl_a_20ed)) %>% # remove the columns with the incorrect units
+  rename(chl_a_16ed = chl_a_16ed_mgL, # rename the correct columns so they match the original dataset
+         chl_a_20ed = chl_a_20ed_mgL)
+
+# step 3. bind the two datasets back together
+chl_a_messy_mgL_v2 <- bind_rows(chl_a_messy_mgL, chl_a_messy_mgm3) # the number of observations in this new dataset is 1578, which matches the original dataset
+
+# step 4. extract the two chl_a columns and the unit column
+chl_a_cols <- chl_a_messy_mgL_v2 %>%
+  select(chl_a_16ed, chl_a_20ed, unit) %>%
+  rename(chl_a_16ed_new = chl_a_16ed, # rename the columns so I can bind them without the names changing automatically
+         chl_a_20ed_new = chl_a_20ed,
+         unit_new = unit) 
+
+# step 5. bind these columns onto the clean dataset and remove the existing columns
+chl_a_clean_v2 <- bind_cols(chl_a_clean, chl_a_cols) %>%
+  dplyr::select(!c(chl_a_16ed, chl_a_20ed, unit)) %>% # remove the old columns with the incorrect units included
+  rename(chl_a_16ed = chl_a_16ed_new, # rename back to the original columns names for consistence
+         chl_a_20ed = chl_a_20ed_new, 
+         unit = unit_new)
+
+# step 6. check that the new clean dataset has the same dimensions as the messy dataset
+chl_a_clean_v2 %>% 
+  assertr::verify(nrow(.) == 1578) # no error message means there are the same number of rows
+chl_a_clean_v2 %>% 
+  assertr::verify(ncol(.) == 15) # no error message means there are the same number of columns
+```
+
+
+
+Now, that I've resolved all the formatting errors I originally identified, I am going to move on to the *invalid values*.
+
+First, I will deal with the negative value is in extract_volume_ml. To make sure there are no other negatives than the one I previously identified, I will use the 'assert(within_bounds())' function from the assertr package.
+```{r}
+# step 1. look for negative values in all numeric/integer columns
+chl_a_clean_v2 %>% 
+  assert(within_bounds(0, Inf), 
+         -c(chl_a_sample_code, station_code, date, sample_replicate, subsample_replicate, description, unit)) # only identified one negative value (-9.8)
+
+# step 2. correct the negative value
+chl_a_clean_v2$extract_volume_ml[chl_a_clean_v2$extract_volume_ml == '-9.8'] <- 9.8
+
+# step 3. check that the negative value was corrected
+chl_a_clean_v2 %>% 
+  assert(within_bounds(0, Inf), 
+         -c(chl_a_sample_code, station_code, date, sample_replicate, subsample_replicate, description, unit)) # no error message means that the negative value was corrected
+
+# step 4. check that the replacement did not change the class
+is.numeric(chl_a_clean_v2$extract_volume_ml)
+```
+In this situation, I chose to replace the negative value with the positive equivalent, because it seemed likely that it was a typo.
+
+Next, I will address the value around 10,000 in sample_volume_filtered_ml. Based on the Data Dictionary, the sample_volume_filtered_ml should be between 0 and 1000, so I will check for any values > 1000 using the 'assert(within_bounds())' function from the assertr package. 
+```{r}
+# step 1. look for negative values in all numeric/integer columns
+chl_a_clean_v2 %>% 
+  assert(within_bounds(0, 1000), sample_volume_filtered_ml) # only identified the value I had found before
+
+# step 2. correct the value that's too large
+chl_a_clean_v2$sample_volume_filtered_ml[chl_a_clean_v2$sample_volume_filtered_ml == '10000'] <- 1000
+
+# step 3. check that the negative value was corrected
+chl_a_clean_v2 %>% 
+  assert(within_bounds(0, 1000), sample_volume_filtered_ml) # no error message means that the value was corrected
+
+# step 4. check that the replacement did not change the class
+is.numeric(chl_a_clean_v2$sample_volume_filtered_ml)
+```
+In this situation, I chose to replace the 10000 with 1000, because it seemed likely that it was a typo.
+
+
+
+Now that I've dealt with all the formatting issues and invalid values, I am able to check for *outliers*. 
+
+First, I am going to check for outliers in absorbance_750nm using the 'insist(within_n_mads(3))' command from assertr. I am going to use 3 MAD from the median as my identifier for outliers.
+```{r}
+# step 1. identify potential outliers
+chl_a_clean_v2 %>% 
+  insist(within_n_mads(3), absorbance_750nm) # 161 potential outliers
+
+# step 2. plot the distribution again
+ggplot(chl_a_clean_v2, aes(x = absorbance_750nm)) +
+  geom_histogram()
+```
+I am not going to remove any of the potential outliers identified by insist(within_n_mads(3)). I chose to retain them all because there are quite a few points in the upper tail of the distribution, which leads me to believe that these are unusual, but correct, values.
+
+Next, I am going to look for outliers in chl_a_16ed using the 'insist(within_n_mads(3))' command from assertr. I am going to use 3 MAD from the median as my identifier for outliers.
+```{r}
+# step 1. identify potential outliers
+chl_a_clean_v2 %>% 
+  insist(within_n_mads(3), chl_a_16ed) # 116 potential outliers
+
+# step 2. plot the distribution again
+ggplot(chl_a_clean_v2, aes(x = chl_a_16ed)) +
+  geom_histogram()
+```
+I am not going to remove any of the potential outliers identified by insist(within_n_mads(3)). I chose to retain them all because there are quite a few points in the upper tail of the distribution, which leads me to believe that these are unusual, but correct, values. 
+
+Next, I am going to look for outliers in chl_a_20ed using the 'insist(within_n_mads(3))' command from assertr. I am going to use 3 MAD from the median as my identifier for outliers.
+```{r}
+# step 1. identify potential outliers
+chl_a_clean_v2 %>% 
+  insist(within_n_mads(3), chl_a_20ed) # 117 potential outliers
+
+# step 2. plot the distribution again
+ggplot(chl_a_clean_v2, aes(x = chl_a_20ed)) +
+  geom_histogram()
+
+# step 3. identify the outlier
+chl_a_clean_v2 %>%
+  arrange(desc(chl_a_20ed)) %>%
+  slice_head(n = 5) # 391.05
+
+# step 4. remove the outlier
+chl_a_clean_v2 <- chl_a_clean_v2 %>%
+  filter(!chl_a_20ed == "391.05")
+```
+I chose to remove one of the potential outliers identified by insist(within_n_mads(3)). I chose to remove the value at 391.05 because there was a gap of over 300 units between the highest and second highest value. 
+
+
+
+### 3b. Stations dataset
 
 
 
 
+### 3c. Waterbodies dataset
+
+
+
+
+
+### 3d. Match Records Across Tables*
+
+*Identify Shared Columns*
+
+
+*Check Records*
+Before I can join the tables, I hace to check that records in one table have corresponding records in the related table
+
+*Investigate Unmatched Records*
+
+
+*Join the Tables*
+
+Finally, I need to confirm that the join did not unexpectedly add or duplicate records
 
 
 
