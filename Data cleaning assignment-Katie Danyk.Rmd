@@ -548,6 +548,41 @@ I chose to remove one of the potential outliers identified by insist(within_n_ma
 
 
 
+Finally, I will check for *string errors* in the 'character' columns
+```{r}
+# step 1a. check if all station codes start with the correct string
+as_tibble(str_detect(chl_a_messy$station_code, '\\bST0')) %>% 
+  mutate(ID = row_number()) %>%
+  filter(!value == "TRUE") # there is one station code that start with "ST0" in row 271
+
+# step 1b. view the row with the incorrect station code
+chl_a_messy %>%
+  slice(271) # the station code is ST999 - this is likely a typo and should be corrected to ST099
+
+# step 1c. correct the type found in step 1a
+chl_a_clean_v2$station_code[chl_a_clean_v2$station_code == 'ST999'] <- 'ST099'
+
+# step 1d. check that the typo is now correct
+grep('ST999', chl_a_clean_v2$station_code) # the typo is no longer present
+
+# step 2. check that all sample codes start with the correct string
+as_tibble(str_detect(chl_a_messy$chl_a_sample_code, '\\bCH')) %>% 
+  filter(!value == "TRUE") # all sample codes start with the correct string
+
+# step 3. look for spaces in columns where there shouldn't be 
+as_tibble(str_detect(chl_a_messy$station_code, '[[:space:]]')) %>% 
+  filter(!value == "FALSE") # no spaces
+as_tibble(str_detect(chl_a_messy$chl_a_sample_code, '[[:space:]]')) %>% 
+  filter(!value == "FALSE") # no spaces
+
+# step 4. look for lowercase letters in columns where there shouldn't be 
+as_tibble(str_detect(chl_a_messy$station_code, '[[:lower:]]')) %>% 
+  filter(!value == "FALSE") # no lowercases
+as_tibble(str_detect(chl_a_messy$chl_a_sample_code, '[[:lower:]]')) %>% 
+  filter(!value == "FALSE") # no lowercases
+```
+
+
 ### 3b. Stations dataset
 
 From my exploration of the stations dataset above, I have identified the following errors:
@@ -658,7 +693,11 @@ plot(clusters.type) # there are no spelling errors
 str_detect(stations_messy$station_code, '[O]') # no uppercase O's
 str_detect(stations_messy$waterbody_code, '[O]') # no uppercase O's
 
-# step 6. check that the dimensions of the cleaned dataset match the messy dataset
+# step 6. check that all waterbody and station codes start with the correct sequence
+str_detect(stations_messy$waterbody_code, '\\bWB0') # They all start with the correct sequence
+str_detect(stations_messy$station_code, '\\bST0') # They all start with the correct sequence
+
+# step 7. check that the dimensions of the cleaned dataset match the messy dataset
 stations_clean_v2 %>% 
   verify(nrow(.) == 97) # no error message means the number of rows is the same
 stations_clean_v2 %>% 
@@ -711,11 +750,14 @@ grep('quinn lake', waterbodies_clean$waterbody_name) # the capitalization error 
 # step 4. check if any of the zeros are uppercase O's
 str_detect(waterbodies_messy$waterbody_code, '[O]') # no uppercase O's
 
-# step 5. check that the variable classes in the cleaned dataset are still correct
+# step 5. check that all waterbody codes start with "WB0"
+str_detect(waterbodies_messy$waterbody_code, '\\bWB0') # They all start with the correct sequence
+
+# step 6. check that the variable classes in the cleaned dataset are still correct
 is.character(waterbodies_clean$waterbody_code)
 is.character(waterbodies_clean$waterbody_name)
 
-# step 6. check that the dimensions of the clean dataset match the messy dataset
+# step 7. check that the dimensions of the clean dataset match the messy dataset
 waterbodies_clean %>% 
   verify(nrow(.) == 87) # no error message means the number of rows is the same
 waterbodies_clean %>% 
@@ -728,17 +770,113 @@ waterbodies_clean %>%
 ### 3d. Match Records Across Tables*
 
 *Identify Shared Columns*
-
+  - waterbody_code is the shared column between the stations and waterbodies datasets
+  - station_code is the shared column between the stations and chl a datasets
 
 *Check Records*
-Before I can join the tables, I hace to check that records in one table have corresponding records in the related table
+Before I can join the tables, I have to check that records in one table have corresponding records in the related table. To do this, I'm going to compare each rows in the shared columns.
+
+First, I will look at the waterbody_code columns. Since there are multiple stations per waterbody, I will have to filter out repeat rows in stations_clean_v2$waterbody_code
+```{r}
+# step 1. extract waterbody_code columns
+stations_wb_code <- stations_clean_v2 %>%
+  select(waterbody_code) %>%
+  arrange(waterbody_code) %>%
+  group_by(waterbody_code) %>%
+  distinct()
+waterbodies_wb_code <- waterbodies_clean %>%
+  select(waterbody_code) %>%
+  arrange(waterbody_code)
+
+# step 2. compare to see if there are matching values
+stations_wb_code$waterbody_code == waterbodies_wb_code$waterbody_code
+```
+All of the waterbody codes appear in both datasets
+
+
+Next, I will look at the station_code columns. Since there are multiple samples per station, I will have to filter out repeat rows in chl_a_clean_v2$station_code
+```{r}
+# step 1. extract station_code columns
+chl_a_st_code <- chl_a_clean_v2 %>%
+  select(station_code) %>%
+  arrange(station_code) %>%
+  group_by(station_code) %>%
+  distinct()
+stations_st_code <- stations_clean_v2 %>%
+  select(station_code) %>%
+  arrange(station_code)
+
+# step 2. compare to see if there are matching values
+stations_st_code$station_code == chl_a_st_code$station_code # there are unmatched values because the datasets are two different lengths
+```
+There are a different number of station codes in each dataset, therefor not all of the stations in the stations_clean_v2 dataset occur in the chl_a_clean_v2 dataset.
+
 
 *Investigate Unmatched Records*
+
+I am first going to look at the number of unique station codes in in each dataset. Then, I will look at which stations are missing from the chl a dataset
+```{r}
+# step 1. determine the number of stations in each dataset
+nrow(stations_st_code) # 97 rows = 97 stations
+nrow(chl_a_st_code) # 70 rows = 70 stations
+
+# step 2. create a new column in each dataset with just the station number
+chl_a_st_code <- chl_a_st_code %>%
+  mutate(station_ID = station_code) %>%
+  separate(station_ID, into =  c("st", "ID"), sep = "T") %>%
+  select(!st) %>%
+  rename(station_code_chla = station_code)
+stations_st_code <- stations_st_code %>%
+  mutate(station_ID = station_code) %>%
+  separate(station_ID, into =  c("st", "ID"), sep = "T") %>%
+  select(!st) %>%
+  rename(station_code_st = station_code)
+
+# step 3. determine which stations are missing from the chl a dataset
+stations_missing <- left_join(stations_st_code, chl_a_st_code, by = "ID") %>%
+  filter(is.na(station_code_chla))
+```
+The difference in the number of rows from step 1 is 27, meaning 27 stations should be missing from chl_a_clean_v2. However, when I joined the two station_code columns together in steps 2 and 3, I get 28 stations that were missing from chl_a_clean_v2. Since all stations should be present in the stations dataset, it seems like I have an extra station present in the chl a dataset. 
+
+To investigate this, I will do an anti-join to see which station from the chl a dataset is not present in the stations dataset
+```{r}
+# step 1. anti_join the datasets to see which one is extra
+anti_join(chl_a_st_code, stations_st_code, by = "ID")
+```
+The extra station is the one with the typo I corrected in section 3a. Chl a dataset, so it seems like i corrected the typo wrong. There is no way to know what the correct station name should be since, the only shared column between the stations and chl a datasets in station_code. Since there is data in this row, I am not going to remove the entire row. I will leave this station code for now, so I can include this data in the joined table, but I will change the station_code to NA once my table is complete.
+
 
 
 *Join the Tables*
 
-Finally, I need to confirm that the join did not unexpectedly add or duplicate records
+I want my completed table to be based off of the information in the chl a dataset. 
+
+First I need to joint the waterbodies and stations datasets together using the waterbody_code column. I want have one row for each station, so I need to join the waterbodies dataset into the stations dataset. Since the stations dataset has 97 rows, my joined table should also have 97 rows. The stations dataset has 6 columns and the waterbodies dataset has 2, therefor my joined table should have 7.
+```{r}
+# step 1. join the tables by waterbody_code
+waterbodies_stations <- left_join(stations_clean_v2, waterbodies_clean, by = "waterbody_code")
+
+# step 2. check that the table has the expected number of rows and columns
+nrow(waterbodies_stations) # 97 rows as expected
+ncol(waterbodies_stations) # 7 columns as expected
+```
+
+Then, I can join the waterbodies_stations dataset with the chl a dataset using the station_code column. I want to have one row for each chl a sample, so I need to join the waterbodies_stations dataset into the chl a dataset. Since the cleaned chl a dataset has 1577 rows, my joined table should also have 1577 rows. The chl a dataset has 15 columns and the waterbodies_stations dataset has 7, therefor my joined table should have 21. Once the tables are fully joined, I will also replace the incorrect station ID (ST099) identified above with NA
+```{r}
+# step 1. join the tables by station_code
+chl_a_joined <- left_join(chl_a_clean_v2, waterbodies_stations, by = "station_code")
+
+# step 2. check that the table has the expected number of rows and columns
+nrow(chl_a_joined) # 1577 rows as expected
+ncol(chl_a_joined) # 21 columns as expected
+
+# step 3. replace incorrect station ID with NA
+chl_a_joined$station_code[chl_a_joined$station_code == 'ST099'] <- NA
+
+# step 4. check that the incorrect station ID was replaced
+grep('ST099', chl_a_joined$station_code) # the incorrect ID is no longer present
+```
+
 
 
 
