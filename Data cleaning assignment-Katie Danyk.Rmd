@@ -18,7 +18,7 @@ library(here)
 library(tidyverse)
 library(assertr)
 library(skimr)
-library(rempsyc)
+library(stringdist)
 ```
 
 
@@ -307,7 +307,8 @@ From my exploration of the chl a dataset above, I have identified the following 
     - chl_a_16ed and chl_a_20ed contain two different units when they should only be mg/L
     
   *String errors*  
-  
+    - no previously identified errors
+    
   *Invalid values*
     - extract_volume_ml has a negative value
     - sample_volume_filtered_ml has a value around 10,000
@@ -549,11 +550,177 @@ I chose to remove one of the potential outliers identified by insist(within_n_ma
 
 ### 3b. Stations dataset
 
+From my exploration of the stations dataset above, I have identified the following errors:
+  *Individual outliers*
+    - no previously identified errors 
+  
+  *Formatting errors*
+    - no previously identified errors 
+    
+  *String errors*  
+    - no previously identified errors
+  
+  *Invalid values*
+    - latitude of -83.96436
+    - longitude of 84.11925
+    - longitude around 50
+
+More errors may be revealed as I clean the data and they will be dealt with as they appear. I'm going to start with resolving the *invalid values*.
+
+Before I begin, I will duplicate the dataset so I'm not editing the raw data
+```{r}
+stations_clean <- stations_messy
+```
+
+Because the latitudes and longitudes have an unknown number of decimal places, I am not able to replace values the way I was doing it above. Instead, I will first determine all invalid values and then separate them into a new dataset so I can deal with them appropriately
+```{r}
+# step 1. identify all invlalid values
+stations_messy %>% 
+  assert(within_bounds(0, Inf), latitude) # invalid value at row 52: -83.96436
+stations_messy %>% 
+  assert(within_bounds(-Inf, 0), longitude) # invalid value at row 5: 84.11925; row 52: 46.73345
+
+# step 2. determine if longitude = 84.11925 is a typo
+stations_messy %>%
+  group_by(waterbody_code) %>%
+  summarise(mean = mean(longitude)) %>%
+  arrange(desc(mean)) # a station at -84.11925 would be very close to waterbodies, therefore it is likely a typo
+
+# step 3. separate invalid values into new datasets
+st_5_lon <- stations_messy %>%
+  filter(station_code == "ST005") # the longitude will have to me multiplied by -1
+st_52_lat_lon <- stations_messy %>%
+  filter(station_code == "ST052") # the longitude and latitude will have to be renamed to the other name
+
+# step 4. fix invlaide values
+st_5_lon <- st_5_lon %>%
+  mutate(longitude = longitude * -1)
+st_52_lat_lon <- st_52_lat_lon %>%
+  rename(longitude = latitude,
+         latitude = longitude)
+
+# step 5. remove the stations with invalid lat and lon valued from the clean dataset
+stations_clean <- stations_clean %>%
+  filter(!station_code %in% c("ST005", "ST052"))
+
+# step 6. bind the fixed rows to the clean dataset
+stations_clean_v2 <- bind_rows(stations_clean, st_5_lon, st_52_lat_lon)
+
+# step 7. check that the dimensions of the new clean dataset are the same as the messy dataset
+stations_clean_v2 %>% 
+  verify(nrow(.) == 97) # no error message means the number of rows is the same
+stations_clean_v2 %>% 
+  verify(ncol(.) == 6) # no error message means the number of columns is the same
+
+# step 8. check that there are no invalid lat and lon values in the clean dataset
+stations_clean_v2 %>% 
+  assert(within_bounds(0, Inf), latitude) # no error means no invalid values
+stations_clean_v2 %>% 
+  assert(within_bounds(-Inf, 0), longitude) # no error means no invalid values
+```
+
+
+
+Now that I have dealt with the issues I was able to find during exploration, I also want to check if there are any *string errors* in the 'character' columns.
+```{r}
+# step 1. look for spaces in columns where there shouldn't be 
+str_detect(stations_messy$station_code, '[[:space:]]') # no spaces
+str_detect(stations_messy$waterbody_code, '[[:space:]]') # no spaces
+str_detect(stations_messy$station_type, '[[:space:]]') # no spaces
+
+# step 2. look for lowercase letters in columns where there shouldn't be 
+str_detect(stations_messy$station_code, '[[:lower:]]') # no lowercases
+str_detect(stations_messy$waterbody_code, '[[:lower:]]') # no lowercases
+
+# step 3a. use a cluster diagram to look for typos in station_name
+dist.matrix.name <- stringdist::stringdistmatrix(stations_messy$station_name, stations_messy$station_name, method = 'jw', p = 0.1)
+row.names(dist.matrix.name) <- stations_messy$station_name
+names(dist.matrix.name) <- stations_messy$station_name
+dist.matrix.name <- as.dist(dist.matrix.name)
+clusters.name <- hclust(dist.matrix.name, method = "ward.D2")
+plot(clusters.name) # there is an error in the spelling of 'Main station'
+
+# step 3b. fix the spelling error identified in step 3a
+stations_clean_v2$station_name[stations_clean_v2$station_name == 'Main statoin'] <- 'Main station'
+
+# step 3c. check that the spelling error was fixed
+grep('Main statoin', stations_clean_v2$station_name) # the spelling error is no longer detected
+
+# step 4. use a cluster diagram to look for typos in station_type
+dist.matrix.type <- stringdist::stringdistmatrix(stations_messy$station_type, stations_messy$station_type, method = 'jw', p = 0.1)
+row.names(dist.matrix.type) <- stations_messy$station_type
+names(dist.matrix.type) <- stations_messy$station_type
+dist.matrix.type <- as.dist(dist.matrix.type)
+clusters.type <- hclust(dist.matrix.type, method = "ward.D2")
+plot(clusters.type) # there are no spelling errors
+
+# step 5. check if any of the zeros are uppercase O's
+str_detect(stations_messy$station_code, '[O]') # no uppercase O's
+str_detect(stations_messy$waterbody_code, '[O]') # no uppercase O's
+
+# step 6. check that the dimensions of the cleaned dataset match the messy dataset
+stations_clean_v2 %>% 
+  verify(nrow(.) == 97) # no error message means the number of rows is the same
+stations_clean_v2 %>% 
+  verify(ncol(.) == 6) # no error message means the number of columns is the same
+```
+
+
 
 
 
 ### 3c. Waterbodies dataset
 
+From my exploration of the waterbodies dataset above, I have identified the following errors:
+  *Individual outliers*
+    - no previously identified errors
+  
+  *Formatting errors*
+    - no previously identified errors
+    
+  *String errors*  
+    - no previously identified errors
+    
+  *Invalid values*
+    - no previously identified errors 
+  
+Since there are only two 'character' columns in this dataset, I can only look for *string errors*
+
+Before I begin, I will duplicate the dataset so I'm not editing the raw data
+```{r}
+waterbodies_clean <- waterbodies_messy
+```
+
+
+```{r}
+# step 1. look for spaces in columns where there shouldn't be
+str_detect(waterbodies_messy$waterbody_code, '[[:space:]]') # no spaces
+
+# step 2. look for lowercase letters in columns where there shouldn't be 
+str_detect(waterbodies_messy$waterbody_code, '[[:lower:]]') # no lowercases
+
+# step 3a. look for lowercase letters at the beginning of names
+str_view(waterbodies_messy$waterbody_name, '\\b[[:lower:]]') # Quinn Lake starts with a lowercase
+
+# step 3b. fix the capitalization error found in step 3a
+waterbodies_clean$waterbody_name[waterbodies_clean$waterbody_name == 'quinn lake'] <- 'Quinn Lake'
+
+# step 3c. check that the capitalization error was fixed
+grep('quinn lake', waterbodies_clean$waterbody_name) # the capitalization error is no longer present
+
+# step 4. check if any of the zeros are uppercase O's
+str_detect(waterbodies_messy$waterbody_code, '[O]') # no uppercase O's
+
+# step 5. check that the variable classes in the cleaned dataset are still correct
+is.character(waterbodies_clean$waterbody_code)
+is.character(waterbodies_clean$waterbody_name)
+
+# step 6. check that the dimensions of the clean dataset match the messy dataset
+waterbodies_clean %>% 
+  verify(nrow(.) == 87) # no error message means the number of rows is the same
+waterbodies_clean %>% 
+  verify(ncol(.) == 2) # no error message means the number of columns is the same
+```
 
 
 
