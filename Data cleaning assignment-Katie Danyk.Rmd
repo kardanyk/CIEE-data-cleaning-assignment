@@ -19,6 +19,7 @@ library(tidyverse)
 library(assertr)
 library(skimr)
 library(stringdist)
+library(sf)
 ```
 
 
@@ -68,6 +69,7 @@ stations_messy <- read_csv("Raw_data/stations-messy.csv")
 # messy waterbodies data 
 waterbodies_messy <- read_csv("Raw_data/waterbodies-messy.csv")
 ```
+
 
 
 
@@ -875,7 +877,102 @@ chl_a_joined$station_code[chl_a_joined$station_code == 'ST099'] <- NA
 
 # step 4. check that the incorrect station ID was replaced
 grep('ST099', chl_a_joined$station_code) # the incorrect ID is no longer present
+
+# step 5. check that there are no duplicate chl a values
+chl_a_joined %>%
+  assert_rows(duplicates_across_cols, in_set(chl_a_joined$chl_a_16ed), chl_a_16ed) # no error message means there are no duplicate chl_a_16ed values
+chl_a_joined %>%
+  assert_rows(duplicates_across_cols, in_set(chl_a_joined$chl_a_20ed), chl_a_20ed) # no error message means there are no duplicate chl_a_20ed values
 ```
+
+
+
+
+
+# Step 4. Spatial Errors
+
+The first thing I'm going to check is that all of the coordinates fall within the bounds of the Turkey Lakes Watershed study area. I was able to find a map of the turkey lakes watershed study area that I could select coordinates from and it included the coordinate reference system used for the map (crs = 3978) (https://app.geo.ca/en-ca/map-browser/record/f2ac0ae9-dd2f-4a70-b059-f8a49d9f5982). 
+```{r}
+# step 1. extract the coordinate columns and remove the row that contained the missing station code
+chla_coords <- chl_a_joined %>%
+  select(latitude, longitude) %>%
+  drop_na() 
+
+# step 2. convert to an sf object with the correct crs
+chla_coords_sf <- st_as_sf(chla_coords, coords = c("longitude", "latitude"), crs = 3978)
+
+# step 3. create the polygon of the turkey lakes watershed
+watershed_polygon_matrix = cbind(x = c(-84.437818, -84.366472, -84.366472, -84.437818, -84.437818),
+                                 y = c(47.078770, 47.078770, 47.027852, 47.027852, 47.078770)) 
+watershed_polygon_sfc = st_sfc(st_polygon(list(watershed_polygon_matrix)), crs = 3978)
+
+# step 4. determine if the coordinates in the chla dataset are within the bounds of the watershed
+within_bounds <- as.data.frame(st_intersects(chla_coords_sf, watershed_polygon_sfc)) # only 1081 of the samples are within the bounds 
+```
+The st_intersects function returned 1081 observations within the bounds of the turkey lakes watershed. I'm going to investigate why there are so may points outside the watershed bounds by comparing station and waterbody locations
+
+```{r}
+# step 1. select the required columns
+stations_wb_location <- chl_a_joined %>%
+  select(waterbody_code, station_code, station_type, latitude, longitude) %>%
+  group_by(station_code) %>%
+  distinct() 
+
+# step 2. determine which waterbodies have more than one station
+stations_wb_location %>%
+  group_by(waterbody_code) %>%
+  count() %>%
+  filter(n > 1) # five waterbodies have more than one station (WB065, WB066, WB075, WB085, WB087)
+
+# step 3. compare the locations of stations on the same waterbody
+stations_wb_location %>%
+  filter(waterbody_code == "WB065") # ST066 is quite far away from ST065 and ST067
+stations_wb_location %>%
+  filter(waterbody_code == "WB066") # the stations are very close to each other
+stations_wb_location %>%
+  filter(waterbody_code == "WB075") # the stations are very close to each other
+stations_wb_location %>%
+  filter(waterbody_code == "WB085") # the stations are very close to each other
+stations_wb_location %>%
+  filter(waterbody_code == "WB087") # the stations are very close to each other
+```
+ST066 is very far away from the other two stations on WB065. This suggests that this station is not actually on WB065. There is no way to know which lake this station is supposed to be on, but there is still data in this row, so I am going to replace the waterbody code with NA in the cleaned dataset
+
+```{r}
+# step 1. replace the incorrect waterbody code
+chl_a_joined$waterbody_code[chl_a_joined$waterbody_code == 'WB065'] <- NA
+
+# step 2. check that the incorrect waterbody code was replaced
+grep('WB065', chl_a_joined$waterbody_code) # the incorrect ID is no longer present
+
+# step 3. count the number of observations in ST066 
+chl_a_joined %>%
+  filter(station_code == "ST066") # 20 observations
+```
+There are only 20 observations from ST066, but this station is out of bounds based on the turkey lakes polygon I created.
+
+Since comparing the station and waterbody locations only returned a few of the observations that were out of bounds, I am going keep the rest of the stations and waterbodies codes how they originally were and not remove any more.
+
+
+
+
+
+# Step 5. Export csv
+
+Now that the dataset is fully cleaned, I can export it to a csv
+```{r}
+# step 1. rename the cleaned file to something more descriptive
+turkey_lakes_clean <- chl_a_joined
+
+write_csv(turkey_lakes_clean, "Clean_data/turkey_lakes_clean.csv")
+```
+
+
+
+
+
+
+
 
 
 
