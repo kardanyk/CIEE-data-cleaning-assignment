@@ -124,13 +124,13 @@ Based on the Data Dictionary, and the output of the str() command, I can tell th
 The dim() output tells me that there are 1578 rows and 15 columns.
 
 *skim() output*
-From the skim() output, I can see that none of the 'character' variables have white spaces or missing values, except "description", but this is okay because the Data Dictionary says that "description" was not always recorded. There are also two unique values for "units", when ther should only be one.
+From the skim() output, I can see that none of the 'character' variables have white spaces or missing values, except "description", but this is okay because the Data Dictionary says that "description" was not always recorded. There are also two unique values for "units", when there should only be one.
 
 For the 'numeric' variable part of the skim() output, I can see that the only variables with missing values are "sample_replicate" and "subsample_replicate". This is not a problem for "subsample_replicate" based on the Data Dictionary description, but the Data Dictionary does not mention missing values for "sample_replicate" so there are potentially errors here.
 
 I can also see that "extract_volume_ml" has a -9.8 in the "p0" column, leading me to believe there is a typo in the "extract_volume_ml" column because this column should only contain positive values based on the Data Dictionary description.
 
-Lastly, the "p100" column has a 70.680 and 391.050 for "chl_a_16ed" and "chl_a_20ed" respectively, which both seem a bit high compared to the means and sd's and suggests that there might be typos in these columns.
+Lastly, the "p100" column has a 70.680 and 391.050 for "chl_a_16ed" and "chl_a_20ed" respectively, which both seem a bit high compared to the means and sd's and suggests that there might be typos or outliers in these columns.
 
 
 
@@ -241,7 +241,7 @@ ggplot() +
 I can see the value at about -84 again that I previously identified using skim()
 
 *longitude*
-It looks like there are two typos in "longitude". I previously identified the one at about 84 with skim(), but I can see an additional point here at about 50. The point at about 80 is likely just missing the "-" and can be fixed later. It's possible the latitude typo at -84 and the longitude typo at about 50 are coordinates of one station, just entered in the incorrect column, but I will check this in a later step.
+It looks like there are two typos in "longitude". I previously identified the one at about 84 with skim(), but I can see an additional point here at about 50. The point at about 80 is likely just missing the "-" and can be fixed later. It's possible the latitude typo at -84 and the longitude typo at about 50 are coordinates of one station, just entered in the incorrect columns, but I will check this in a later step.
 
 
 
@@ -267,12 +267,12 @@ From the str() output, I can see that the columns with class 'character' are:
 Both columns have the correct class based on the Data Dictionary descriptions
 
 *dim() output*
-The dim() output lets me knwo that this dataset has 87 rows and 2 columns
+The dim() output lets me know that this dataset has 87 rows and 2 columns
 
 *skim() output*
 The skim() output tells me that there are no missing values or white spaces in either column, which is correct based on the Data Dictionary.
 
-I can also see that "n_unique" is 87 for both "waterbody_code" and "waterbody_name". I know this is correct because each waterbody should have a unique and code
+I can also see that "n_unique" is 87 for both "waterbody_code" and "waterbody_name". I know this is correct because each waterbody should have a unique name and code
 
 
 
@@ -284,7 +284,7 @@ I cannot look at the distribution of these variables because they are not numeri
 
 From the provided ERD, I can see that the column "waterbody_code" can be used to join the waterbodies and stations datasets. From my skim() output above, I can see that the "waterbody_code" contains 87 unique values in both datasets.
 
-Once the waterbodies and stations datasets are merged, I can then use the column "station_code" can be used to join the previously merged datasets with the chl a dataset. From my skim() output about, I can see that the stations dataset has 97 unique "station_code" values, while the chl a dataset only has 70 unique values. This is likely because not every station was sampled, but I will check that there are no incorrect station codes in a later step.
+Once the waterbodies and stations datasets are merged, I can then use the column "station_code" to join the previously merged datasets with the chl a dataset. From my skim() output about, I can see that the stations dataset has 97 unique "station_code" values, while the chl a dataset only has 70 unique values. This is likely because not every station was sampled, but I will check that there are no incorrect station codes in a later step.
 
 
 
@@ -418,7 +418,7 @@ is.Date(chl_a_clean$date)
 The last formatting error I identified was that two units were being used for chl_a_16ed and chl_a_20ed when there should only be one. To fix this I will convert all the mg/m3 values to mg/L. 
 1 mg/m3 = 0.001 mg/L so I need to multiply these values by 0.001 to convert to m/L
 ```{r}
-# step 1. separate the dataset into two by on the unit that was used
+# step 1. separate the dataset into two by the unit that was used
 chl_a_messy_mgL <- chl_a_messy %>%
   filter(unit == "mg/L")
 chl_a_messy_mgm3 <- chl_a_messy %>%
@@ -446,7 +446,7 @@ chl_a_cols <- chl_a_messy_mgL_v2 %>%
 # step 5. bind these columns onto the clean dataset and remove the existing columns
 chl_a_clean_v2 <- bind_cols(chl_a_clean, chl_a_cols) %>%
   dplyr::select(!c(chl_a_16ed, chl_a_20ed, unit)) %>% # remove the old columns with the incorrect units included
-  rename(chl_a_16ed = chl_a_16ed_new, # rename back to the original columns names for consistence
+  rename(chl_a_16ed = chl_a_16ed_new, # rename new columns back to the original column names for consistency
          chl_a_20ed = chl_a_20ed_new, 
          unit = unit_new)
 
@@ -540,7 +540,7 @@ ggplot(chl_a_clean_v2, aes(x = chl_a_20ed)) +
 # step 3. identify the outlier
 chl_a_clean_v2 %>%
   arrange(desc(chl_a_20ed)) %>%
-  slice_head(n = 5) # 391.05
+  slice_head(n = 5) # the outlier is 391.05
 
 # step 4. remove the outlier
 chl_a_clean_v2 <- chl_a_clean_v2 %>%
@@ -555,13 +555,13 @@ Finally, I will check for *string errors* in the 'character' columns
 # step 1a. check if all station codes start with the correct string
 as_tibble(str_detect(chl_a_messy$station_code, '\\bST0')) %>% 
   mutate(ID = row_number()) %>%
-  filter(!value == "TRUE") # there is one station code that start with "ST0" in row 271
+  filter(!value == "TRUE") # there is one station code that doesn't start with "ST0" in row 271
 
 # step 1b. view the row with the incorrect station code
 chl_a_messy %>%
   slice(271) # the station code is ST999 - this is likely a typo and should be corrected to ST099
 
-# step 1c. correct the type found in step 1a
+# step 1c. correct the typo found in step 1a
 chl_a_clean_v2$station_code[chl_a_clean_v2$station_code == 'ST999'] <- 'ST099'
 
 # step 1d. check that the typo is now correct
@@ -583,6 +583,7 @@ as_tibble(str_detect(chl_a_messy$station_code, '[[:lower:]]')) %>%
 as_tibble(str_detect(chl_a_messy$chl_a_sample_code, '[[:lower:]]')) %>% 
   filter(!value == "FALSE") # no lowercases
 ```
+
 
 
 ### 3b. Stations dataset
@@ -621,11 +622,11 @@ stations_messy %>%
 stations_messy %>%
   group_by(waterbody_code) %>%
   summarise(mean = mean(longitude)) %>%
-  arrange(desc(mean)) # a station at -84.11925 would be very close to waterbodies, therefore it is likely a typo
+  arrange(desc(mean)) # a station at -84.11925 would be very close to the waterbodies, therefore it is likely a typo
 
 # step 3. separate invalid values into new datasets
 st_5_lon <- stations_messy %>%
-  filter(station_code == "ST005") # the longitude will have to me multiplied by -1
+  filter(station_code == "ST005") # the longitude will have to be multiplied by -1
 st_52_lat_lon <- stations_messy %>%
   filter(station_code == "ST052") # the longitude and latitude will have to be renamed to the other name
 
@@ -776,7 +777,7 @@ waterbodies_clean %>%
   - station_code is the shared column between the stations and chl a datasets
 
 *Check Records*
-Before I can join the tables, I have to check that records in one table have corresponding records in the related table. To do this, I'm going to compare each rows in the shared columns.
+Before I can join the tables, I have to check that records in one table have corresponding records in the related table. To do this, I'm going to compare each row in the shared columns.
 
 First, I will look at the waterbody_code columns. Since there are multiple stations per waterbody, I will have to filter out repeat rows in stations_clean_v2$waterbody_code
 ```{r}
@@ -791,9 +792,8 @@ waterbodies_wb_code <- waterbodies_clean %>%
   arrange(waterbody_code)
 
 # step 2. compare to see if there are matching values
-stations_wb_code$waterbody_code == waterbodies_wb_code$waterbody_code
+stations_wb_code$waterbody_code == waterbodies_wb_code$waterbody_code # all of the waterbody codes appear in both datasets
 ```
-All of the waterbody codes appear in both datasets
 
 
 Next, I will look at the station_code columns. Since there are multiple samples per station, I will have to filter out repeat rows in chl_a_clean_v2$station_code
@@ -838,22 +838,21 @@ stations_st_code <- stations_st_code %>%
 stations_missing <- left_join(stations_st_code, chl_a_st_code, by = "ID") %>%
   filter(is.na(station_code_chla))
 ```
-The difference in the number of rows from step 1 is 27, meaning 27 stations should be missing from chl_a_clean_v2. However, when I joined the two station_code columns together in steps 2 and 3, I get 28 stations that were missing from chl_a_clean_v2. Since all stations should be present in the stations dataset, it seems like I have an extra station present in the chl a dataset. 
+The difference in the number of rows from step 1 is 27, meaning 27 stations should be missing from chl_a_clean_v2. However, when I joined the two station_code columns together in steps 2 and 3, I get 28 stations that were missing from chl_a_clean_v2. Since all stations should be present in the stations dataset, it seems like I have a station present in the chl a dataset that is not present in the stations dataset. 
 
 To investigate this, I will do an anti-join to see which station from the chl a dataset is not present in the stations dataset
 ```{r}
 # step 1. anti_join the datasets to see which one is extra
-anti_join(chl_a_st_code, stations_st_code, by = "ID")
+anti_join(chl_a_st_code, stations_st_code, by = "ID") # ST099
 ```
-The extra station is the one with the typo I corrected in section 3a. Chl a dataset, so it seems like i corrected the typo wrong. There is no way to know what the correct station name should be since, the only shared column between the stations and chl a datasets in station_code. Since there is data in this row, I am not going to remove the entire row. I will leave this station code for now, so I can include this data in the joined table, but I will change the station_code to NA once my table is complete.
-
+The extra station is the one with the typo that I corrected in section 3a. Chl a dataset, so it seems like I corrected the typo wrong. There is no way to know what the correct station name should be since, the only shared column between the stations and chl a datasets is station_code. Since there is data in this row, I am not going to remove the entire row. I will leave this station code for now, so I can include this data in the joined table, but I will change the station_code to NA once my table is complete.
 
 
 *Join the Tables*
 
 I want my completed table to be based off of the information in the chl a dataset. 
 
-First I need to joint the waterbodies and stations datasets together using the waterbody_code column. I want have one row for each station, so I need to join the waterbodies dataset into the stations dataset. Since the stations dataset has 97 rows, my joined table should also have 97 rows. The stations dataset has 6 columns and the waterbodies dataset has 2, therefor my joined table should have 7.
+First I need to joint the waterbodies and stations datasets together using the waterbody_code column. I want to have one row for each station, so I need to join the waterbodies dataset into the stations dataset. Since the stations dataset has 97 rows, my joined table should also have 97 rows. The stations dataset has 6 columns and the waterbodies dataset has 2, therefor my joined table should have 7.
 ```{r}
 # step 1. join the tables by waterbody_code
 waterbodies_stations <- left_join(stations_clean_v2, waterbodies_clean, by = "waterbody_code")
@@ -909,7 +908,7 @@ watershed_polygon_sfc = st_sfc(st_polygon(list(watershed_polygon_matrix)), crs =
 # step 4. determine if the coordinates in the chla dataset are within the bounds of the watershed
 within_bounds <- as.data.frame(st_intersects(chla_coords_sf, watershed_polygon_sfc)) # only 1081 of the samples are within the bounds 
 ```
-The st_intersects function returned 1081 observations within the bounds of the turkey lakes watershed. I'm going to investigate why there are so may points outside the watershed bounds by comparing station and waterbody locations
+The st_intersects function returned 1081 observations within the bounds of the turkey lakes watershed. I'm going to investigate why there are so many points outside the watershed bounds by comparing station and waterbody locations
 
 ```{r}
 # step 1. select the required columns
@@ -951,7 +950,7 @@ chl_a_joined %>%
 ```
 There are only 20 observations from ST066, but this station is out of bounds based on the turkey lakes polygon I created.
 
-Since comparing the station and waterbody locations only returned a few of the observations that were out of bounds, I am going keep the rest of the stations and waterbodies codes how they originally were and not remove any more.
+Since comparing the station and waterbody locations only returned 20 of the observations that were out of bounds, I am going keep the rest of the station and waterbody codes how they originally were and not remove any more.
 
 
 
@@ -964,14 +963,15 @@ Now that the dataset is fully cleaned, I can export it to a csv
 # step 1. rename the cleaned file to something more descriptive
 turkey_lakes_clean <- chl_a_joined
 
+#step 2. write file path with here()
+here::here(
+  "Clean_data",
+  "turkey_lakes_clean.csv"
+)
+
+# step 3. write the csv
 write_csv(turkey_lakes_clean, "Clean_data/turkey_lakes_clean.csv")
 ```
-
-
-
-
-
-
 
 
 
